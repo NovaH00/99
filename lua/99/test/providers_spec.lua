@@ -89,6 +89,90 @@ describe("providers", function()
     end)
   end)
 
+  describe("PiProvider", function()
+    it("builds correct command with model", function()
+      local request = { model = "anthropic/claude-sonnet-4-5" }
+      local cmd =
+        Providers.PiProvider._build_command(nil, "test query", request)
+      eq({
+        "pi",
+        "--print",
+        "--model",
+        "anthropic/claude-sonnet-4-5",
+        "test query",
+      }, cmd)
+    end)
+
+    it("builds prompt with line-numbered snippet and tool usage hints", function()
+      local mock_range = {
+        to_text = function()
+          return "local x = 1\nlocal y = 2"
+        end,
+        start = { to_vim = function() return 5, 0 end },
+        end_ = { to_vim = function() return 6, 11 end },
+      }
+      local context = {
+        user_prompt = "refactor this",
+        full_path = "/path/to/file.lua",
+        data = { type = "visual", range = mock_range },
+      }
+      local prompt = Providers.PiProvider._build_prompt(context)
+      eq(
+        [[Edit the file below using your edit tool. Apply a "fill in the middle" change: keep the surrounding context unchanged, but modify the snippet according to the instruction.
+
+<file>/path/to/file.lua</file>
+
+<snippet_to_replace>
+5: local x = 1
+6: local y = 2
+</snippet_to_replace>
+
+<instruction>
+refactor this
+</instruction>
+
+<tool_usage>
+- Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
+- If that doesn't show enough context, read again with line offsets to fetch surrounding sections.
+- You may call the read tool as many times as needed to understand the file and codebase structure.
+- Do not hesitate to explore; thorough context gathering leads to correct edits.
+- If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
+</tool_usage>
+
+<rules>
+- Use your edit tool to replace the snippet in the file with the updated version.
+- Preserve indentation, formatting, and all unchanged lines exactly.
+- Do not output the code in chat. Only use your edit tool.
+</rules>]],
+        prompt
+      )
+    end)
+
+    it("has correct default model", function()
+      eq(
+        "anthropic/claude-sonnet-4-5",
+        Providers.PiProvider._get_default_model()
+      )
+    end)
+
+    it("parses models from --list-models output", function()
+      local models = {}
+      local stdout =
+        "provider            model        context  max-out  thinking  images\nllama.cpp-original  local-model  128K     16.4K    no        no\nllama.cpp-proxied   local-model  128K     16.4K    no        no"
+      local lines = vim.split(stdout, "\n", { trimempty = true })
+      for i = 2, #lines do
+        local parts = vim.split(lines[i], "%s+")
+        if #parts >= 2 then
+          table.insert(models, parts[1] .. "/" .. parts[2])
+        end
+      end
+      eq({
+        "llama.cpp-original/local-model",
+        "llama.cpp-proxied/local-model",
+      }, models)
+    end)
+  end)
+
   describe("provider integration", function()
     it("can be set as provider override", function()
       local _99 = require("99")

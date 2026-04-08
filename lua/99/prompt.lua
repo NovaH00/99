@@ -292,11 +292,16 @@ function Prompt:start_request(observer)
   local ok = self:finalize()
   l:assert(ok, "context failed to finalize")
 
-  --- TODO: create a prompt context class that can actually organize.
-  --- do not do this during the request context refactoring, but next
-  local prompt = table.concat(self.agent_context, "\n")
-  local obs = self:_observer(observer)
   local provider = self._99.provider_override or BaseProvider.OpenCodeProvider
+
+  --- Providers can override _build_prompt to customize the prompt format
+  local prompt
+  if provider._build_prompt then
+    prompt = provider._build_prompt(self)
+  else
+    prompt = table.concat(self.agent_context, "\n")
+  end
+  local obs = self:_observer(observer)
 
   self:save_prompt(prompt)
   l:debug("start", "prompt", prompt)

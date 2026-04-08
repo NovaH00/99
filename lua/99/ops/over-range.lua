@@ -64,6 +64,13 @@ local function over_range(context, opts)
           response or "no response provided"
         )
       elseif status == "success" then
+        -- For providers that edit files directly (like PiProvider), reload buffers
+        local provider = context._99.provider_override
+          or require("99.providers").OpenCodeProvider
+        if provider._build_prompt then
+          vim.cmd("checktime")
+        end
+
         local valid = top_mark:is_valid() and bottom_mark:is_valid()
         if not valid then
           logger:fatal(

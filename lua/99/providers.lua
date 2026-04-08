@@ -19,6 +19,7 @@ end
 
 --- @class _99.Providers.BaseProvider
 --- @field _build_command fun(self: _99.Providers.BaseProvider, query: string, context: _99.Prompt): string[]
+--- @field _build_prompt fun(self: _99.Providers.BaseProvider, context: _99.Prompt): string?
 --- @field _get_provider_name fun(self: _99.Providers.BaseProvider): string
 --- @field _get_default_model fun(): string
 local BaseProvider = {}
@@ -331,6 +332,111 @@ function GeminiCLIProvider._get_default_model()
   return "auto"
 end
 
+--- @class PiProvider : _99.Providers.BaseProvider
+local PiProvider = setmetatable({}, { __index = BaseProvider })
+
+--- @param context _99.Prompt
+--- @return string
+function PiProvider._build_prompt(context)
+  local instruction = context.user_prompt
+  local file_path = context.full_path
+
+  -- Get snippet and line range from visual data if available
+  local snippet_with_lines = ""
+  if context.data and context.data.type == "visual" then
+    local range = context.data.range
+    local lines = vim.split(range:to_text(), "\n")
+    local start_row, _ = range.start:to_vim()
+    local end_row, _ = range.end_:to_vim()
+    
+    -- Prefix each line with its line number
+    local current_line = start_row
+    for _, line in ipairs(lines) do
+      snippet_with_lines = snippet_with_lines .. string.format("%d: %s\n", current_line, line)
+      current_line = current_line + 1
+    end
+    -- Remove trailing newline
+    snippet_with_lines = snippet_with_lines:gsub("\n$", "")
+  end
+
+  return string.format(
+    [[Edit the file below using your edit tool. Apply a "fill in the middle" change: keep the surrounding context unchanged, but modify the snippet according to the instruction.
+
+<file>%s</file>
+
+<snippet_to_replace>
+%s
+</snippet_to_replace>
+
+<instruction>
+%s
+</instruction>
+
+<tool_usage>
+- Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
+- If that doesn't show enough context, read again with line offsets to fetch surrounding sections.
+- You may call the read tool as many times as needed to understand the file and codebase structure.
+- Do not hesitate to explore; thorough context gathering leads to correct edits.
+- If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
+</tool_usage>
+
+<rules>
+- Use your edit tool to replace the snippet in the file with the updated version.
+- Preserve indentation, formatting, and all unchanged lines exactly.
+- Do not output the code in chat. Only use your edit tool.
+</rules>]],
+    file_path,
+    snippet_with_lines,
+    instruction
+  )
+end
+
+--- @param query string
+--- @param context _99.Prompt
+--- @return string[]
+function PiProvider._build_command(_, query, context)
+  return {
+    "pi",
+    "--print",
+    "--model",
+    context.model,
+    query,
+  }
+end
+
+--- @return string
+function PiProvider._get_provider_name()
+  return "PiProvider"
+end
+
+--- @return string
+function PiProvider._get_default_model()
+  return "anthropic/claude-sonnet-4-5"
+end
+
+function PiProvider.fetch_models(callback)
+  vim.system({ "pi", "--list-models" }, { text = true }, function(obj)
+    vim.schedule(function()
+      if obj.code ~= 0 then
+        callback(nil, "Failed to fetch models from pi")
+        return
+      end
+      -- pi writes model list to stderr, not stdout
+      local output = obj.stderr or obj.stdout or ""
+      local models = {}
+      local lines = vim.split(output, "\n", { trimempty = true })
+      -- First line is the header, skip it
+      for i = 2, #lines do
+        local parts = vim.split(lines[i], "%s+")
+        if #parts >= 2 then
+          table.insert(models, parts[1] .. "/" .. parts[2])
+        end
+      end
+      callback(models, nil)
+    end)
+  end)
+end
+
 return {
   BaseProvider = BaseProvider,
   OpenCodeProvider = OpenCodeProvider,
@@ -338,4 +444,5 @@ return {
   CursorAgentProvider = CursorAgentProvider,
   KiroProvider = KiroProvider,
   GeminiCLIProvider = GeminiCLIProvider,
+  PiProvider = PiProvider,
 }
