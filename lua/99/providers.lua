@@ -342,21 +342,14 @@ function PiProvider._build_prompt(context)
   local file_path = context.full_path
 
   -- Get snippet and line range from visual data if available
-  local snippet_with_lines = ""
+  local snippet = ""
+  local lines_attr = ""
   if context.data and context.data.type == "visual" then
     local range = context.data.range
-    local lines = vim.split(range:to_text(), "\n")
+    snippet = range:to_text()
     local start_row, _ = range.start:to_vim()
     local end_row, _ = range.end_:to_vim()
-    
-    -- Prefix each line with its line number
-    local current_line = start_row
-    for _, line in ipairs(lines) do
-      snippet_with_lines = snippet_with_lines .. string.format("%d: %s\n", current_line, line)
-      current_line = current_line + 1
-    end
-    -- Remove trailing newline
-    snippet_with_lines = snippet_with_lines:gsub("\n$", "")
+    lines_attr = string.format(' lines="%d-%d"', start_row, end_row)
   end
 
   return string.format(
@@ -364,7 +357,7 @@ function PiProvider._build_prompt(context)
 
 <file>%s</file>
 
-<snippet_to_replace>
+<snippet_to_replace%s>
 %s
 </snippet_to_replace>
 
@@ -372,21 +365,50 @@ function PiProvider._build_prompt(context)
 %s
 </instruction>
 
+<edit_strategy>
+The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
+- Choose oldText to be unique enough to match exactly what you want to change.
+- newText is the full replacement — it completely substitutes oldText.
+- NEVER use oldText as just a "marker" with newText as additional content.
+
+Examples:
+
+1. Adding a docstring to a function (oldText includes the function line, newText has docstring + function):
+   oldText = "def foo(x):\n    return x + 1"
+   newText = "def foo(x):\n    \"\"\"Add one to x.\"\"\"\n    return x + 1"
+
+2. Changing a function signature (oldText = old sig, newText = new sig + same body):
+   oldText = "def foo(x):\n    return x + 1"
+   newText = "def foo(x: int) -> int:\n    return x + 1"
+
+3. Modifying a variable assignment:
+   oldText = "count = 0"
+   newText = "count = 10"
+
+4. Removing a line:
+   oldText = "print('debug')"
+   newText = ""
+</edit_strategy>
+
 <tool_usage>
 - Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
 - If that doesn't show enough context, read again with line offsets to fetch surrounding sections.
 - You may call the read tool as many times as needed to understand the file and codebase structure.
 - Do not hesitate to explore; thorough context gathering leads to correct edits.
 - If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
+- Use bash for exploration (grep, ls, find) if you need to navigate the codebase.
 </tool_usage>
 
-<rules>
-- Use your edit tool to replace the snippet in the file with the updated version.
-- Preserve indentation, formatting, and all unchanged lines exactly.
-- Do not output the code in chat. Only use your edit tool.
-</rules>]],
+<edit_rules>
+- Each oldText must be UNIQUE and exactly match the original file content.
+- All edits are applied against the original file simultaneously, NOT incrementally.
+- Merge nearby or related changes into a single edit; do not emit overlapping edits.
+- Do NOT include large unchanged blocks just to connect distant changes.
+- Preserve exact indentation, whitespace, and formatting of unchanged lines.
+</edit_rules>]],
     file_path,
-    snippet_with_lines,
+    lines_attr,
+    snippet,
     instruction
   )
 end

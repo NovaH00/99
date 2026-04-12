@@ -65,10 +65,13 @@ local function over_range(context, opts)
         )
       elseif status == "success" then
         -- For providers that edit files directly (like PiProvider), reload buffers
+        -- and skip the standard text replacement since the agent already wrote the file
         local provider = context._99.provider_override
           or require("99.providers").OpenCodeProvider
         if provider._build_prompt then
           vim.cmd("checktime")
+          vim.notify("99: Agent finished", vim.log.levels.INFO)
+          return
         end
 
         local valid = top_mark:is_valid() and bottom_mark:is_valid()

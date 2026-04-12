@@ -103,7 +103,7 @@ describe("providers", function()
       }, cmd)
     end)
 
-    it("builds prompt with line-numbered snippet and tool usage hints", function()
+    it("builds prompt with line range in snippet tag attribute", function()
       local mock_range = {
         to_text = function()
           return "local x = 1\nlocal y = 2"
@@ -122,14 +122,39 @@ describe("providers", function()
 
 <file>/path/to/file.lua</file>
 
-<snippet_to_replace>
-5: local x = 1
-6: local y = 2
+<snippet_to_replace lines="5-6">
+local x = 1
+local y = 2
 </snippet_to_replace>
 
 <instruction>
 refactor this
 </instruction>
+
+<edit_strategy>
+The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
+- Choose oldText to be unique enough to match exactly what you want to change.
+- newText is the full replacement — it completely substitutes oldText.
+- NEVER use oldText as just a "marker" with newText as additional content.
+
+Examples:
+
+1. Adding a docstring to a function (oldText includes the function line, newText has docstring + function):
+   oldText = "def foo(x):\n    return x + 1"
+   newText = "def foo(x):\n    \"\"\"Add one to x.\"\"\"\n    return x + 1"
+
+2. Changing a function signature (oldText = old sig, newText = new sig + same body):
+   oldText = "def foo(x):\n    return x + 1"
+   newText = "def foo(x: int) -> int:\n    return x + 1"
+
+3. Modifying a variable assignment:
+   oldText = "count = 0"
+   newText = "count = 10"
+
+4. Removing a line:
+   oldText = "print('debug')"
+   newText = ""
+</edit_strategy>
 
 <tool_usage>
 - Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
@@ -137,13 +162,16 @@ refactor this
 - You may call the read tool as many times as needed to understand the file and codebase structure.
 - Do not hesitate to explore; thorough context gathering leads to correct edits.
 - If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
+- Use bash for exploration (grep, ls, find) if you need to navigate the codebase.
 </tool_usage>
 
-<rules>
-- Use your edit tool to replace the snippet in the file with the updated version.
-- Preserve indentation, formatting, and all unchanged lines exactly.
-- Do not output the code in chat. Only use your edit tool.
-</rules>]],
+<edit_rules>
+- Each oldText must be UNIQUE and exactly match the original file content.
+- All edits are applied against the original file simultaneously, NOT incrementally.
+- Merge nearby or related changes into a single edit; do not emit overlapping edits.
+- Do NOT include large unchanged blocks just to connect distant changes.
+- Preserve exact indentation, whitespace, and formatting of unchanged lines.
+</edit_rules>]],
         prompt
       )
     end)
