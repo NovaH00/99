@@ -341,21 +341,51 @@ function PiProvider._build_prompt(context)
   local instruction = context.user_prompt
   local file_path = context.full_path
 
-  -- Get snippet and line range from visual data if available
   local snippet = ""
   local lines_attr = ""
+  local base_path = nil
+  local agent_path = nil
+
   if context.data and context.data.type == "visual" then
     local range = context.data.range
     snippet = range:to_text()
     local start_row, _ = range.start:to_vim()
     local end_row, _ = range.end_:to_vim()
     lines_attr = string.format(' lines="%d-%d"', start_row, end_row)
+    base_path = context.data.base_path
+    agent_path = context.data.agent_path
+  end
+
+  local merge_context = ""
+  local edit_file_path = file_path
+  if base_path and agent_path then
+    edit_file_path = agent_path
+    merge_context = string.format(
+      [[
+
+<merge_setup>
+This is a 3-way merge setup. You are editing a COPY of the file, not the original.
+- ACTUAL_FILE: %s (the file you are reasoning about - imports, types, etc.)
+- AGENT_FILE: %s (your working copy - edit THIS FILE using your edit tool)
+- BASE_FILE: %s (original snapshot, do not edit)
+
+Both ACTUAL_FILE and AGENT_FILE contain the same code - they are identical copies.
+The only difference is their location. Use ACTUAL_FILE when using read/bash tools to understand
+imports, types, and project structure. ALWAYS use AGENT_FILE when making edits with the edit tool.
+The merge system will combine your changes in AGENT_FILE with any changes you've made
+to ACTUAL_FILE, so you can safely work on other parts of the codebase while I edit.
+</merge_setup>
+]],
+      file_path,
+      agent_path,
+      base_path
+    )
   end
 
   return string.format(
-    [[Edit the file below using your edit tool. Apply a "fill in the middle" change: keep the surrounding context unchanged, but modify the snippet according to the instruction.
+    [[Apply a "fill in the middle" change to the file below. Keep surrounding context unchanged; only modify the specified snippet.
 
-<file>%s</file>
+<file>%s</file>%s
 
 <snippet_to_replace%s>
 %s
@@ -366,47 +396,15 @@ function PiProvider._build_prompt(context)
 </instruction>
 
 <edit_strategy>
-The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
-- Choose oldText to be unique enough to match exactly what you want to change.
-- newText is the full replacement — it completely substitutes oldText.
-- NEVER use oldText as just a "marker" with newText as additional content.
-
-Examples:
-
-1. Adding a docstring to a function (oldText includes the function line, newText has docstring + function):
-   oldText = "def foo(x):\n    return x + 1"
-   newText = "def foo(x):\n    \"\"\"Add one to x.\"\"\"\n    return x + 1"
-
-2. Changing a function signature (oldText = old sig, newText = new sig + same body):
-   oldText = "def foo(x):\n    return x + 1"
-   newText = "def foo(x: int) -> int:\n    return x + 1"
-
-3. Modifying a variable assignment:
-   oldText = "count = 0"
-   newText = "count = 10"
-
-4. Removing a line:
-   oldText = "print('debug')"
-   newText = ""
-</edit_strategy>
-
-<tool_usage>
-- Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
-- If that doesn't show enough context, read again with line offsets to fetch surrounding sections.
-- You may call the read tool as many times as needed to understand the file and codebase structure.
-- Do not hesitate to explore; thorough context gathering leads to correct edits.
-- If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
-- Use bash for exploration (grep, ls, find) if you need to navigate the codebase.
-</tool_usage>
-
-<edit_rules>
-- Each oldText must be UNIQUE and exactly match the original file content.
-- All edits are applied against the original file simultaneously, NOT incrementally.
-- Merge nearby or related changes into a single edit; do not emit overlapping edits.
-- Do NOT include large unchanged blocks just to connect distant changes.
-- Preserve exact indentation, whitespace, and formatting of unchanged lines.
-</edit_rules>]],
-    file_path,
+- The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
+- Execute edits as needed. Do NOT repeat the same edit after it succeeds.
+- Choose oldText to be UNIQUE and EXACTLY match the file content including whitespace.
+- Merge all related changes into a single edit.
+- Preserve exact indentation and formatting.
+- After executing, re-read to verify. If verification shows the edit succeeded, STOP.
+</edit_strategy>]],
+    edit_file_path,
+    merge_context,
     lines_attr,
     snippet,
     instruction

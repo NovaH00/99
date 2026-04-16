@@ -118,7 +118,7 @@ describe("providers", function()
       }
       local prompt = Providers.PiProvider._build_prompt(context)
       eq(
-        [[Edit the file below using your edit tool. Apply a "fill in the middle" change: keep the surrounding context unchanged, but modify the snippet according to the instruction.
+        [[Apply a "fill in the middle" change to the file below. Keep surrounding context unchanged; only modify the specified snippet.
 
 <file>/path/to/file.lua</file>
 
@@ -132,46 +132,13 @@ refactor this
 </instruction>
 
 <edit_strategy>
-The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
-- Choose oldText to be unique enough to match exactly what you want to change.
-- newText is the full replacement — it completely substitutes oldText.
-- NEVER use oldText as just a "marker" with newText as additional content.
-
-Examples:
-
-1. Adding a docstring to a function (oldText includes the function line, newText has docstring + function):
-   oldText = "def foo(x):\n    return x + 1"
-   newText = "def foo(x):\n    \"\"\"Add one to x.\"\"\"\n    return x + 1"
-
-2. Changing a function signature (oldText = old sig, newText = new sig + same body):
-   oldText = "def foo(x):\n    return x + 1"
-   newText = "def foo(x: int) -> int:\n    return x + 1"
-
-3. Modifying a variable assignment:
-   oldText = "count = 0"
-   newText = "count = 10"
-
-4. Removing a line:
-   oldText = "print('debug')"
-   newText = ""
-</edit_strategy>
-
-<tool_usage>
-- Your first read call does NOT need an offset; it returns ~2k lines or 50KB by default.
-- If that doesn't show enough context, read again with line offsets to fetch surrounding sections.
-- You may call the read tool as many times as needed to understand the file and codebase structure.
-- Do not hesitate to explore; thorough context gathering leads to correct edits.
-- If an edit fails, ALWAYS use the read tool first to investigate what went wrong before retrying.
-- Use bash for exploration (grep, ls, find) if you need to navigate the codebase.
-</tool_usage>
-
-<edit_rules>
-- Each oldText must be UNIQUE and exactly match the original file content.
-- All edits are applied against the original file simultaneously, NOT incrementally.
-- Merge nearby or related changes into a single edit; do not emit overlapping edits.
-- Do NOT include large unchanged blocks just to connect distant changes.
-- Preserve exact indentation, whitespace, and formatting of unchanged lines.
-</edit_rules>]],
+- The edit tool REPLACES oldText with newText. oldText is deleted, newText takes its place.
+- Execute edits as needed. Do NOT repeat the same edit after it succeeds.
+- Choose oldText to be UNIQUE and EXACTLY match the file content including whitespace.
+- Merge all related changes into a single edit.
+- Preserve exact indentation and formatting.
+- After executing, re-read to verify. If verification shows the edit succeeded, STOP.
+</edit_strategy>]],
         prompt
       )
     end)
@@ -181,6 +148,35 @@ Examples:
         "anthropic/claude-sonnet-4-5",
         Providers.PiProvider._get_default_model()
       )
+    end)
+
+    it("builds prompt with merge setup when base and agent paths are provided", function()
+      local mock_range = {
+        to_text = function()
+          return "local x = 1"
+        end,
+        start = { to_vim = function() return 5, 0 end },
+        end_ = { to_vim = function() return 5, 11 end },
+      }
+      local context = {
+        user_prompt = "add docstring",
+        full_path = "/path/to/file.lua",
+        data = {
+          type = "visual",
+          range = mock_range,
+          base_path = "/tmp/base",
+          agent_path = "/tmp/agent",
+        },
+      }
+      local prompt = Providers.PiProvider._build_prompt(context)
+      local has_merge = prompt:find("<merge_setup>") ~= nil
+      local has_actual = prompt:find("ACTUAL_FILE:") ~= nil
+      local has_agent = prompt:find("AGENT_FILE:") ~= nil
+      local has_base = prompt:find("BASE_FILE:") ~= nil
+      eq(true, has_merge)
+      eq(true, has_actual)
+      eq(true, has_agent)
+      eq(true, has_base)
     end)
 
     it("parses models from --list-models output", function()
